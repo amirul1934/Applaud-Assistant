@@ -7,6 +7,9 @@
 //   - audio:      a signed S3 URL returned in the file metadata
 //
 // This is the foundation skeleton: the shape is real, but the heavy parsing is a Phase-2 TODO.
+import fs from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { config } from "../config.js";
 
 const BASE = "https://api.plaud.ai"; // adjust to the observed host
@@ -51,12 +54,12 @@ export class PlaudClient {
     return (await this.get(`/ai/transsumm/${id}`)) as { transcript: unknown; summary: string };
   }
 
-  /** Download audio bytes from the signed URL. */
-  async downloadAudio(file: PlaudFile): Promise<ArrayBuffer> {
+  /** Stream audio from the signed URL straight to disk (avoids buffering large files in memory). */
+  async downloadAudioToFile(file: PlaudFile, dest: string): Promise<void> {
     if (!file.audioUrl) throw new Error(`no audio url for ${file.id}`);
     const res = await fetch(file.audioUrl);
-    if (!res.ok) throw new Error(`audio download ${file.id} -> ${res.status}`);
-    return res.arrayBuffer();
+    if (!res.ok || !res.body) throw new Error(`audio download ${file.id} -> ${res.status}`);
+    await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), fs.createWriteStream(dest));
   }
 }
 

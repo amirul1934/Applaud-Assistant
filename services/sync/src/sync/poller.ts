@@ -16,12 +16,11 @@ async function mirrorFile(file: PlaudFile) {
   const dir = path.join(config.recordingsDir, file.id);
   fs.mkdirSync(dir, { recursive: true });
 
-  // 1) audio
+  // 1) audio — streamed straight to disk to keep memory flat for large recordings
   let audioPath: string | null = null;
   if (file.audioUrl) {
-    const buf = Buffer.from(await plaud.downloadAudio(file));
     audioPath = path.join(dir, "audio.mp3");
-    fs.writeFileSync(audioPath, buf);
+    await plaud.downloadAudioToFile(file, audioPath);
   }
 
   // 2) Plaud's own transcript/summary, if present
@@ -53,13 +52,19 @@ async function mirrorFile(file: PlaudFile) {
   await maybeAutoArchive(file.id);
 }
 
+let isPolling = false;
+
 export async function pollOnce() {
-  if (!plaud.configured) return; // nothing to do until a token is configured
+  // Skip if not configured, or if a previous cycle is still running (avoids overlapping polls).
+  if (!plaud.configured || isPolling) return;
+  isPolling = true;
   try {
     const files = await plaud.listFiles();
     for (const f of files) await mirrorFile(f).catch((e) => console.error("mirror", f.id, e));
   } catch (e) {
     console.error("poll failed:", (e as Error).message);
+  } finally {
+    isPolling = false;
   }
 }
 

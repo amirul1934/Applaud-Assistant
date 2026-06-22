@@ -10,6 +10,9 @@ import os
 
 from .config import config
 
+# Whisper pipeline is expensive to construct (loads the model into RAM/VRAM); build it once.
+_pipe = None
+
 
 def _pick_device() -> str:
     if config.whisper_device != "auto":
@@ -30,17 +33,19 @@ def transcribe(audio_path: str) -> dict:
     if not os.path.exists(audio_path):
         raise FileNotFoundError(audio_path)
 
+    global _pipe
     device = _pick_device()
     try:
-        from transformers import pipeline  # type: ignore
+        if _pipe is None:
+            from transformers import pipeline  # type: ignore
 
-        pipe = pipeline(
-            "automatic-speech-recognition",
-            model=config.whisper_model,
-            device=device if device != "cpu" else -1,
-            return_timestamps=True,
-        )
-        out = pipe(audio_path)
+            _pipe = pipeline(
+                "automatic-speech-recognition",
+                model=config.whisper_model,
+                device=device if device != "cpu" else -1,
+                return_timestamps=True,
+            )
+        out = _pipe(audio_path)
         chunks = out.get("chunks", [])
         segments = [
             {

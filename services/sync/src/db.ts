@@ -68,8 +68,16 @@ export const listRecordings = db.prepare(
 );
 export const getRecording = db.prepare(`SELECT * FROM recordings WHERE id = ?`);
 
-export const setFlag = (id: string, column: string, value: number) =>
-  db.prepare(`UPDATE recordings SET ${column} = ? WHERE id = ?`).run(value, id);
+// Only these boolean flag columns may be written via setFlag — guards the interpolation below.
+const FLAG_COLUMNS = new Set([
+  "has_plaud_transcript",
+  "has_local_transcript",
+  "has_local_summary",
+]);
+export const setFlag = (id: string, column: string, value: number) => {
+  if (!FLAG_COLUMNS.has(column)) throw new Error(`illegal flag column: ${column}`);
+  return db.prepare(`UPDATE recordings SET ${column} = ? WHERE id = ?`).run(value, id);
+};
 
 export const setArchiveStatus = db.prepare(
   `UPDATE recordings SET archive_status = ?, drive_folder_id = ? WHERE id = ?`
@@ -82,3 +90,4 @@ export const createJob = db.prepare(`
 export const updateJob = db.prepare(
   `UPDATE jobs SET status = ?, detail = ?, updated_at = ? WHERE id = ?`
 );
+export const getJob = db.prepare(`SELECT * FROM jobs WHERE id = ?`);

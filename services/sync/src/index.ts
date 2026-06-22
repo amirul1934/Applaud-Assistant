@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { login, logout, requireAuth } from "./auth.js";
 import {
   createJob,
+  getJob,
   getRecording,
   listRecordings,
   setFlag,
@@ -42,23 +43,27 @@ api.get("/recordings/:id", (req, res) => {
   res.json(rec);
 });
 
-// On-demand local Whisper transcription.
-api.post("/recordings/:id/transcribe", async (req, res) => {
+// On-demand local Whisper transcription. Runs in the background (can take minutes); the response
+// returns 202 + a job id immediately so the HTTP request never hangs into a gateway timeout.
+api.post("/recordings/:id/transcribe", (req, res) => {
   const rec = getRecording.get(req.params.id) as Recording | undefined;
   if (!rec?.audio_path) return res.status(404).json({ error: "no audio" });
-  const job = createJob.run(rec.id, "transcribe", Date.now(), Date.now());
-  try {
-    const result = await processing.transcribe(rec.audio_path);
-    const dir = path.join(config.recordingsDir, rec.id);
-    fs.writeFileSync(path.join(dir, "local.transcript.json"), JSON.stringify(result, null, 2));
-    setFlag(rec.id, "has_local_transcript", 1);
-    updateJob.run("done", null, Date.now(), Number(job.lastInsertRowid));
-    await emit("transcript_ready", { id: rec.id, source: "local" });
-    res.json({ ok: true, segments: result.segments.length });
-  } catch (e) {
-    updateJob.run("error", (e as Error).message, Date.now(), Number(job.lastInsertRowid));
-    res.status(502).json({ error: (e as Error).message });
-  }
+  const jobId = Number(createJob.run(rec.id, "transcribe", Date.now(), Date.now()).lastInsertRowid);
+
+  void (async () => {
+    try {
+      const result = await processing.transcribe(rec.audio_path!);
+      const dir = path.join(config.recordingsDir, rec.id);
+      fs.writeFileSync(path.join(dir, "local.transcript.json"), JSON.stringify(result, null, 2));
+      setFlag(rec.id, "has_local_transcript", 1);
+      updateJob.run("done", null, Date.now(), jobId);
+      await emit("transcript_ready", { id: rec.id, source: "local" });
+    } catch (e) {
+      updateJob.run("error", (e as Error).message, Date.now(), jobId);
+    }
+  })();
+
+  res.status(202).json({ ok: true, jobId });
 });
 
 // On-demand local LLM analysis (summary). Reads the best available transcript.
@@ -73,20 +78,28 @@ api.post("/recordings/:id/analyze", async (req, res) => {
 
   const transcript = JSON.parse(fs.readFileSync(file, "utf8"));
   const text = typeof transcript.text === "string" ? transcript.text : JSON.stringify(transcript);
-  const job = createJob.run(rec.id, "analyze", Date.now(), Date.now());
-  try {
-    const { summary } = await processing.analyze(text, {
-      provider: req.body?.provider,
-      model: req.body?.model,
-    });
-    fs.writeFileSync(path.join(dir, "local.summary.md"), summary);
-    setFlag(rec.id, "has_local_summary", 1);
-    updateJob.run("done", null, Date.now(), Number(job.lastInsertRowid));
-    res.json({ ok: true });
-  } catch (e) {
-    updateJob.run("error", (e as Error).message, Date.now(), Number(job.lastInsertRowid));
-    res.status(502).json({ error: (e as Error).message });
-  }
+  const { provider, model } = req.body ?? {};
+  const jobId = Number(createJob.run(rec.id, "analyze", Date.now(), Date.now()).lastInsertRowid);
+
+  void (async () => {
+    try {
+      const { summary } = await processing.analyze(text, { provider, model });
+      fs.writeFileSync(path.join(dir, "local.summary.md"), summary);
+      setFlag(rec.id, "has_local_summary", 1);
+      updateJob.run("done", null, Date.now(), jobId);
+    } catch (e) {
+      updateJob.run("error", (e as Error).message, Date.now(), jobId);
+    }
+  })();
+
+  res.status(202).json({ ok: true, jobId });
+});
+
+// Poll the status of a background job (transcribe / analyze).
+api.get("/jobs/:id", (req, res) => {
+  const job = getJob.get(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  res.json(job);
 });
 
 // Archive a recording to Google Drive on demand.

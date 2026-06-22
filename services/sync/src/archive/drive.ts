@@ -40,8 +40,10 @@ function authed(): OAuth2Client {
 }
 
 async function ensureFolder(drive: ReturnType<typeof google.drive>, name: string, parent?: string) {
+  // Escape backslashes before single quotes so folder names can't break the Drive query syntax.
+  const escapedName = name.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   const q = [
-    `name = '${name.replace(/'/g, "\\'")}'`,
+    `name = '${escapedName}'`,
     "mimeType = 'application/vnd.google-apps.folder'",
     "trashed = false",
     parent ? `'${parent}' in parents` : "'root' in parents",
@@ -96,13 +98,22 @@ export async function archiveRecording(id: string): Promise<{ folderId: string; 
   const root = await ensureFolder(drive, config.drive.folderName);
   const folderId = await ensureFolder(drive, `${rec.title ?? "Untitled"} [${id}]`, root);
 
+  // Map existing files in the folder so retries update in place instead of creating duplicates.
+  const existing = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: "files(id, name)",
+  });
+  const existingByName = new Map(existing.data.files?.map((f) => [f.name, f.id!]) ?? []);
+
   const uploaded: string[] = [];
   for (const name of fs.readdirSync(dir)) {
-    await drive.files.create({
-      requestBody: { name, parents: [folderId] },
-      media: { body: fs.createReadStream(path.join(dir, name)) },
-      fields: "id",
-    });
+    const media = { body: fs.createReadStream(path.join(dir, name)) };
+    const existingId = existingByName.get(name);
+    if (existingId) {
+      await drive.files.update({ fileId: existingId, media, fields: "id" });
+    } else {
+      await drive.files.create({ requestBody: { name, parents: [folderId] }, media, fields: "id" });
+    }
     uploaded.push(name);
   }
   return { folderId, files: uploaded };
