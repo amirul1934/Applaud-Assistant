@@ -4,7 +4,9 @@ services:
   web:
     build: ./services/web
     environment:
-      - VITE_SYNC_URL=http://localhost:${SYNC_PORT:-8080}
+      # The Vite dev server proxies /api to the sync service over the compose network,
+      # so this must be the service name (not localhost, which would be the web container).
+      - VITE_SYNC_URL=http://sync:8080
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
