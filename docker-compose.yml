@@ -1,0 +1,58 @@
+# Applaud-Assistant — unified self-hosted audio workspace.
+# `docker compose up --build` brings up web + sync + processing (+ optional ollama).
+services:
+  web:
+    build: ./services/web
+    environment:
+      - VITE_SYNC_URL=http://localhost:${SYNC_PORT:-8080}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - sync
+
+  sync:
+    build: ./services/sync
+    env_file: .env
+    environment:
+      - PROCESSING_URL=http://processing:8000
+      - DATA_DIR=/data
+    ports:
+      - "${SYNC_PORT:-8080}:8080"
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+      # Mount your OAuth token store so it persists across restarts.
+      - ./secrets:/secrets
+    depends_on:
+      - processing
+
+  processing:
+    build: ./services/processing
+    env_file: .env
+    environment:
+      - DATA_DIR=/data
+    # Not published to the host — only `sync` talks to it (internal network).
+    expose:
+      - "8000"
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+      - ./models:/models
+    # Uncomment to give the processing container access to NVIDIA GPUs for Whisper.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # Optional local LLM runtime. Remove if you only use hosted providers.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  ollama:

@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.local
+*.local
+secrets/
+**/credentials.json
+**/token.json
+**/google-oauth-token.json
+
+# Runtime data
+data/
+recordings/
+*.sqlite
+*.sqlite3
+*.db
+
+# Whisper / model caches
+models/
+.cache/
+
+# Logs
+logs/
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
