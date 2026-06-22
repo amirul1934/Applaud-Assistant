@@ -1,0 +1,59 @@
+name: CI
+
+# Runs on every PR and on pushes to main. These checks are what branch protection
+# requires before a PR can auto-merge.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    name: sync (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # --ignore-scripts skips native builds (e.g. better-sqlite3); type-checking only needs types.
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - run: pnpm exec tsc --noEmit
+
+  web:
+    name: web (typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: pnpm install --no-frozen-lockfile --ignore-scripts
+      - run: pnpm exec tsc --noEmit
+
+  processing:
+    name: processing (import + compile)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/processing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - run: python -m compileall -q app
+      - run: python -c "import app.main"
