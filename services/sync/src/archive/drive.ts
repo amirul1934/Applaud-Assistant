@@ -103,7 +103,9 @@ export async function archiveRecording(id: string): Promise<{ folderId: string; 
     q: `'${folderId}' in parents and trashed = false`,
     fields: "files(id, name)",
   });
-  const existingByName = new Map(existing.data.files?.map((f) => [f.name, f.id!]) ?? []);
+  const existingByName = new Map(
+    (existing.data.files ?? []).map((f) => [String(f.name), f.id!] as [string, string])
+  );
 
   const uploaded: string[] = [];
   for (const name of fs.readdirSync(dir)) {
