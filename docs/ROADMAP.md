@@ -14,11 +14,14 @@ archiver. The items below turn the skeleton into the full product.
 - [x] Google Drive archiver (OAuth user account)
 - [x] Minimal web shell (login + recordings list + actions)
 
-## Phase 2 — Make the mirror real
-- [ ] Port `rsteckler/applaud`'s production Plaud client (S3 audio, `ai/transsumm` transcripts)
-- [ ] Browser-profile token auto-extraction + refresh handling
-- [ ] Full-text search across transcripts
-- [ ] Robust incremental sync + retry/backoff + dedupe
+## Phase 2 — Make the mirror real ✅ (mostly)
+- [x] Production Plaud client: regional hosts, audio via `/file/temp-url` (streamed S3 download +
+      md5), `/ai/transsumm` transcripts/summaries, `-302` region correction, browser-UA + 5xx retries
+- [x] Runtime token configuration + 401/expiry handling (paste a fresh token in the UI; no restart;
+      persisted to `$DATA_DIR/plaud-config.json`)
+- [x] Full-text search across transcripts (SQLite FTS5 + `GET /api/search`)
+- [x] Robust incremental sync + dedupe (skip fully-mirrored, retry pending transcripts, poll lock)
+- [ ] Browser-profile token *auto*-extraction (OS-specific; deferred — paste the token for now)
 
 ## Phase 3 — Make local processing real
 - [ ] Wire `insanely-fast-whisper` with real model management + batching

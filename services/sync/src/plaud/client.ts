@@ -1,75 +1,217 @@
-// Minimal Plaud web-API client.
+// Real Plaud web-API client.
 //
-// Plaud exposes no public API. The production approach (see rsteckler/applaud) reuses the bearer
-// token from a logged-in browser session and calls the undocumented web endpoints:
-//   - list:       GET  /file/simple/web
-//   - transcript: GET  /ai/transsumm/<id>
-//   - audio:      a signed S3 URL returned in the file metadata
-//
-// This is the foundation skeleton: the shape is real, but the heavy parsing is a Phase-2 TODO.
+// Plaud has no public API; these are the undocumented endpoints its web app uses (learned from the
+// MIT-licensed rsteckler/applaud). Auth is the bearer token from a logged-in browser session, plus
+// a spoofed browser User-Agent to get past Plaud's WAF. Responses occasionally carry status -302 to
+// redirect to the caller's correct regional host, which we follow and remember.
 import fs from "node:fs";
+import crypto from "node:crypto";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { config } from "../config.js";
+import { getState, setApiBase, markTokenInvalid } from "./store.js";
 
-const BASE = "https://api.plaud.ai"; // adjust to the observed host
+const REGIONS: Record<string, string> = {
+  "us-west-2": "https://api.plaud.ai",
+  "eu-central-1": "https://api-euc1.plaud.ai",
+  "ap-southeast-1": "https://api-apse1.plaud.ai",
+};
 
-export interface PlaudFile {
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+  "Chrome/124.0.0.0 Safari/537.36";
+
+export class PlaudAuthError extends Error {}
+export class PlaudApiError extends Error {
+  constructor(message: string, readonly status: number, readonly body?: string) {
+    super(message);
+  }
+}
+
+export interface PlaudListItem {
+  id: string;
+  isTrash: boolean;
+}
+export interface PlaudDetail {
   id: string;
   title: string;
-  createdAt: number; // epoch ms
+  startTime: number; // epoch ms
   durationSec?: number;
-  audioUrl?: string; // signed S3 URL
-  hasTranscript: boolean;
+  isTrash: boolean;
+}
+export interface TranscriptSegment {
+  start: number; // seconds
+  speaker: string;
+  text: string;
+}
+export interface PlaudTranscript {
+  segments: TranscriptSegment[];
+  text: string; // formatted "[HH:MM:SS] Speaker: text" lines
+  summaryMarkdown: string;
 }
 
-export class PlaudClient {
-  constructor(private token = config.plaud.bearerToken) {}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-  get configured() {
-    return Boolean(this.token);
+async function plaudFetch(pathName: string, init: RequestInit = {}, attempt = 0): Promise<Response> {
+  const { bearerToken, apiBase } = getState();
+  const res = await fetch(`${apiBase}${pathName}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${bearerToken}`,
+      "User-Agent": USER_AGENT,
+      "Content-Type": "application/json",
+      ...(init.headers ?? {}),
+    },
+  });
+  if (res.status === 401) {
+    markTokenInvalid();
+    throw new PlaudAuthError("Plaud token rejected (401) — paste a fresh token in Settings");
   }
+  if (res.status >= 500 && attempt < 3) {
+    await sleep(500 * 2 ** attempt);
+    return plaudFetch(pathName, init, attempt + 1);
+  }
+  return res;
+}
 
-  private async get(path: string): Promise<unknown> {
-    const res = await fetch(`${BASE}${path}`, {
-      headers: { Authorization: `Bearer ${this.token}` },
+async function plaudJson<T = any>(pathName: string, init: RequestInit = {}): Promise<T> {
+  const res = await plaudFetch(pathName, init);
+  const body = await res.text();
+  if (!res.ok) throw new PlaudApiError(`Plaud ${pathName} -> ${res.status}`, res.status, body);
+  let json: any;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    throw new PlaudApiError(`Plaud ${pathName} returned non-JSON`, res.status, body);
+  }
+  // Region correction: -302 tells us the right regional host; switch and retry once.
+  if (json?.status === -302) {
+    const base = resolveRegionalBase(json);
+    if (base) {
+      setApiBase(base);
+      const retry = await plaudFetch(pathName, init);
+      return JSON.parse(await retry.text());
+    }
+  }
+  return json as T;
+}
+
+function resolveRegionalBase(json: any): string | null {
+  const hint = json?.data?.host ?? json?.host ?? json?.data?.region ?? json?.region;
+  if (typeof hint !== "string" || !hint) return null;
+  if (hint.startsWith("http")) return hint.replace(/\/$/, "");
+  if (REGIONS[hint]) return REGIONS[hint];
+  return `https://${hint}`;
+}
+
+// --- list ---
+export async function listAll(pageSize = 50): Promise<PlaudListItem[]> {
+  const out: PlaudListItem[] = [];
+  for (let page = 0, skip = 0; page < 200; page++, skip += pageSize) {
+    const params = new URLSearchParams({
+      skip: String(skip),
+      limit: String(pageSize),
+      sort_by: "start_time",
+      is_desc: "true",
+      is_trash: "2",
     });
-    if (res.status === 401) throw new Error("PLAUD_TOKEN_EXPIRED");
-    if (!res.ok) throw new Error(`plaud ${path} -> ${res.status}`);
-    return res.json();
+    const json = await plaudJson<{ data_file_list?: any[] }>(`/file/simple/web?${params.toString()}`);
+    const items = json.data_file_list ?? [];
+    for (const it of items) {
+      const id = String(it.id ?? it.file_id ?? "");
+      if (id) out.push({ id, isTrash: Boolean(it.is_trash) });
+    }
+    if (items.length < pageSize) break;
   }
-
-  /** List recordings available in the Plaud account. */
-  async listFiles(): Promise<PlaudFile[]> {
-    if (!this.configured) return [];
-    // TODO(phase2): map the real /file/simple/web response shape.
-    const raw = (await this.get("/file/simple/web")) as { data?: unknown[] };
-    return (raw.data ?? []).map((f) => normalizeFile(f as Record<string, unknown>));
-  }
-
-  /** Fetch Plaud's own transcript + summary for a file. */
-  async getTranscript(id: string): Promise<{ transcript: unknown; summary: string } | null> {
-    if (!this.configured) return null;
-    // TODO(phase2): map the real /ai/transsumm/<id> response.
-    return (await this.get(`/ai/transsumm/${id}`)) as { transcript: unknown; summary: string };
-  }
-
-  /** Stream audio from the signed URL straight to disk (avoids buffering large files in memory). */
-  async downloadAudioToFile(file: PlaudFile, dest: string): Promise<void> {
-    if (!file.audioUrl) throw new Error(`no audio url for ${file.id}`);
-    const res = await fetch(file.audioUrl);
-    if (!res.ok || !res.body) throw new Error(`audio download ${file.id} -> ${res.status}`);
-    await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), fs.createWriteStream(dest));
-  }
+  return out;
 }
 
-function normalizeFile(f: Record<string, unknown>): PlaudFile {
+// --- detail ---
+export async function getFileDetail(id: string): Promise<PlaudDetail> {
+  const json = await plaudJson<{ data?: any }>(`/file/detail/${id}`);
+  const d = json.data ?? {};
   return {
-    id: String(f.id ?? f.fileId ?? ""),
-    title: String(f.title ?? f.name ?? "Untitled"),
-    createdAt: Number(f.createdAt ?? f.startTime ?? Date.now()),
-    durationSec: f.duration ? Number(f.duration) : undefined,
-    audioUrl: f.url ? String(f.url) : undefined,
-    hasTranscript: Boolean(f.hasTranscript ?? f.transStatus),
+    id: String(d.file_id ?? id),
+    title: String(d.file_name ?? "Untitled"),
+    startTime: toMs(d.start_time),
+    durationSec: d.duration ? Number(d.duration) : undefined,
+    isTrash: Boolean(d.is_trash),
   };
+}
+
+// --- audio ---
+export async function getAudioUrl(id: string): Promise<string> {
+  const json = await plaudJson<{ temp_url?: string }>(`/file/temp-url/${id}?is_opus=1`);
+  if (!json.temp_url) throw new PlaudApiError(`no temp_url for ${id}`, 200);
+  return json.temp_url;
+}
+
+export async function downloadAudioToFile(id: string, dest: string): Promise<{ bytes: number; md5: string }> {
+  const url = await getAudioUrl(id);
+  const res = await fetch(url); // presigned S3 URL — no Plaud auth
+  if (!res.ok || !res.body) throw new PlaudApiError(`audio download ${id} -> ${res.status}`, res.status);
+  await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), fs.createWriteStream(dest));
+  return { bytes: fs.statSync(dest).size, md5: await md5File(dest) };
+}
+
+function md5File(p: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash("md5");
+    const s = fs.createReadStream(p);
+    s.on("error", reject);
+    s.on("data", (chunk) => hash.update(chunk));
+    s.on("end", () => resolve(hash.digest("hex")));
+  });
+}
+
+// --- transcript + summary ---
+export async function getTranscript(id: string): Promise<PlaudTranscript | null> {
+  const json = await plaudJson<any>(`/ai/transsumm/${id}`, { method: "POST", body: "{}" });
+  const raw: any[] = Array.isArray(json?.data_result) ? json.data_result : [];
+  const segments: TranscriptSegment[] = raw.map((s) => ({
+    start: toSeconds(s.start ?? s.start_time ?? s.timestamp ?? s.time ?? 0),
+    speaker: String(s.speaker ?? s.speaker_name ?? s.role ?? "Speaker"),
+    text: String(s.content ?? s.text ?? s.sentence ?? "").trim(),
+  }));
+  const summaryMarkdown = extractMarkdown(json?.data_result_summ ?? json?.data_note_result ?? "");
+  // Plaud transcribes asynchronously — treat "nothing yet" as not-ready rather than empty success.
+  if (segments.length === 0 && !summaryMarkdown) return null;
+  const text = segments.map((s) => `[${hhmmss(s.start)}] ${s.speaker}: ${s.text}`).join("\n");
+  return { segments, text, summaryMarkdown };
+}
+
+// data_result_summ is inconsistent: a JSON-encoded string for normal recordings, a nested object
+// for short ones, sometimes plain markdown. Normalize all of these to markdown text.
+function extractMarkdown(payload: unknown): string {
+  if (!payload) return "";
+  if (typeof payload === "string") {
+    const s = payload.trim();
+    if (s.startsWith("{") || s.startsWith('"') || s.startsWith("[")) {
+      try {
+        return extractMarkdown(JSON.parse(s));
+      } catch {
+        return s;
+      }
+    }
+    return s;
+  }
+  if (typeof payload === "object") {
+    const o = payload as Record<string, unknown>;
+    return String(o.markdown ?? o.summary ?? o.content ?? o.text ?? "").trim();
+  }
+  return String(payload);
+}
+
+function toMs(v: unknown): number {
+  const n = Number(v);
+  if (!n) return Date.now();
+  return n < 1e12 ? n * 1000 : n; // seconds -> ms heuristic
+}
+function toSeconds(v: unknown): number {
+  const n = Number(v) || 0;
+  return n > 1e7 ? n / 1000 : n; // ms -> seconds heuristic
+}
+function hhmmss(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  const parts = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60];
+  return parts.map((x) => String(x).padStart(2, "0")).join(":");
 }

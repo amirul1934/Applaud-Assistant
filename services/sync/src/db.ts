@@ -35,6 +35,13 @@ db.exec(`
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL
   );
+
+  -- Full-text index over transcript text (Plaud's and/or local Whisper output).
+  CREATE VIRTUAL TABLE IF NOT EXISTS transcripts_fts USING fts5(
+    recording_id UNINDEXED,
+    source UNINDEXED,
+    text
+  );
 `);
 
 export interface Recording {
@@ -91,3 +98,26 @@ export const updateJob = db.prepare(
   `UPDATE jobs SET status = ?, detail = ?, updated_at = ? WHERE id = ?`
 );
 export const getJob = db.prepare(`SELECT * FROM jobs WHERE id = ?`);
+
+// --- full-text search over transcripts ---
+const deleteTranscriptIndex = db.prepare(
+  `DELETE FROM transcripts_fts WHERE recording_id = ? AND source = ?`
+);
+const insertTranscriptIndex = db.prepare(
+  `INSERT INTO transcripts_fts (recording_id, source, text) VALUES (?, ?, ?)`
+);
+export function indexTranscript(recordingId: string, source: string, text: string) {
+  deleteTranscriptIndex.run(recordingId, source);
+  insertTranscriptIndex.run(recordingId, source, text);
+}
+export const searchTranscripts = db.prepare(`
+  SELECT f.recording_id AS id,
+         f.source       AS source,
+         r.title        AS title,
+         snippet(transcripts_fts, 2, '«', '»', ' … ', 12) AS snippet
+  FROM transcripts_fts f
+  JOIN recordings r ON r.id = f.recording_id
+  WHERE transcripts_fts MATCH ?
+  ORDER BY rank
+  LIMIT 50
+`);

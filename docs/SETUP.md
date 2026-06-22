@@ -15,10 +15,12 @@ Fill in at minimum: `APP_USERNAME`, `APP_PASSWORD`, `AUTH_SECRET`.
 Plaud has no public API. The bearer token comes from your logged-in browser session:
 1. Log in to the Plaud web app in your browser.
 2. Open DevTools → Application → Local Storage → copy the bearer/JWT token.
-3. Paste it into `PLAUD_BEARER_TOKEN` in `.env` (or use the in-app setup wizard later).
+3. Either paste it into `PLAUD_BEARER_TOKEN` in `.env`, **or** start the app and paste it into the
+   Plaud panel in the UI (stored at `$DATA_DIR/plaud-config.json`, so it survives restarts).
 
-> The token expires periodically; the sync service will surface when it needs refreshing. A future
-> iteration can auto-extract it from a local browser profile (as upstream `rsteckler/applaud` does).
+> The UI shows the connection state (connected / token expired / not configured) and has a **Sync
+> now** button. When the token expires the status flips to "token expired" — just paste a fresh one;
+> no restart needed. Browser-profile auto-extraction (no manual copy) is a future enhancement.
 
 ## 3. Google Drive archive (OAuth)
 1. In Google Cloud Console, create an OAuth **Desktop app** client; enable the **Drive API**.

@@ -1,75 +1,101 @@
-// Background poller: mirrors new Plaud recordings into local storage on an interval.
+// Background poller: incrementally mirrors Plaud recordings into local storage.
+//
+// Per cycle it lists all recordings and, for any that aren't fully mirrored yet (missing audio or
+// transcript), fetches detail, streams the audio to disk, and pulls Plaud's transcript/summary.
+// Already-complete recordings are skipped (dedupe). Plaud transcribes asynchronously, so a
+// recording with audio but no transcript is retried on later cycles until the transcript appears.
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
-import { getRecording, upsertRecording } from "../db.js";
-import { PlaudClient, type PlaudFile } from "../plaud/client.js";
+import { getRecording, indexTranscript, upsertRecording, type Recording } from "../db.js";
+import * as plaud from "../plaud/client.js";
+import { isConfigured } from "../plaud/store.js";
 import { emit } from "../webhooks.js";
 import { maybeAutoArchive } from "../archiveQueue.js";
 
-const plaud = new PlaudClient();
-
-async function mirrorFile(file: PlaudFile) {
-  const existing = getRecording.get(file.id);
-  if (existing) return; // already mirrored — Phase 2 will reconcile updates
-
-  const dir = path.join(config.recordingsDir, file.id);
+async function mirrorOne(id: string): Promise<void> {
+  const existing = getRecording.get(id) as Recording | undefined;
+  const dir = path.join(config.recordingsDir, id);
   fs.mkdirSync(dir, { recursive: true });
 
-  // 1) audio — streamed straight to disk to keep memory flat for large recordings
-  let audioPath: string | null = null;
-  if (file.audioUrl) {
-    audioPath = path.join(dir, "audio.mp3");
-    await plaud.downloadAudioToFile(file, audioPath);
+  const detail = await plaud.getFileDetail(id);
+  if (detail.isTrash) return;
+
+  // 1) audio — download once, streamed straight to disk
+  let audioPath = existing?.audio_path ?? null;
+  let audioJustArrived = false;
+  if (!audioPath || !fs.existsSync(audioPath)) {
+    audioPath = path.join(dir, "audio.opus");
+    const { md5 } = await plaud.downloadAudioToFile(id, audioPath);
+    fs.writeFileSync(path.join(dir, "audio.md5"), md5);
+    audioJustArrived = true;
   }
 
-  // 2) Plaud's own transcript/summary, if present
-  let hasPlaudTranscript = 0;
-  if (file.hasTranscript) {
-    const t = await plaud.getTranscript(file.id);
+  // 2) transcript + summary — retry on later cycles until Plaud finishes processing
+  let hasTranscript = existing?.has_plaud_transcript ? 1 : 0;
+  let transcriptJustArrived = false;
+  if (!hasTranscript) {
+    const t = await plaud.getTranscript(id).catch(() => null);
     if (t) {
-      fs.writeFileSync(path.join(dir, "plaud.transcript.json"), JSON.stringify(t.transcript, null, 2));
-      fs.writeFileSync(path.join(dir, "plaud.summary.md"), t.summary ?? "");
-      hasPlaudTranscript = 1;
+      fs.writeFileSync(path.join(dir, "plaud.transcript.json"), JSON.stringify(t.segments, null, 2));
+      fs.writeFileSync(path.join(dir, "plaud.transcript.txt"), t.text);
+      if (t.summaryMarkdown) fs.writeFileSync(path.join(dir, "plaud.summary.md"), t.summaryMarkdown);
+      indexTranscript(id, "plaud", t.text);
+      hasTranscript = 1;
+      transcriptJustArrived = true;
     }
   }
 
   upsertRecording.run({
-    id: file.id,
-    title: file.title,
+    id,
+    title: detail.title,
     source: "plaud",
-    created_at: file.createdAt,
+    created_at: detail.startTime,
     mirrored_at: Date.now(),
     audio_path: audioPath,
-    duration_sec: file.durationSec ?? null,
-    has_plaud_transcript: hasPlaudTranscript,
+    duration_sec: detail.durationSec ?? null,
+    has_plaud_transcript: hasTranscript,
   });
 
-  if (audioPath) await emit("audio_ready", { id: file.id, title: file.title, audioPath, source: "plaud" });
-  if (hasPlaudTranscript) await emit("transcript_ready", { id: file.id, source: "plaud" });
-
-  // On-demand processing is the default, but archiving can run automatically.
-  await maybeAutoArchive(file.id);
+  if (audioJustArrived) {
+    await emit("audio_ready", { id, title: detail.title, audioPath, source: "plaud" });
+  }
+  if (transcriptJustArrived) {
+    await emit("transcript_ready", { id, source: "plaud" });
+  }
+  // Auto-archive once a recording first becomes available locally.
+  if (!existing) await maybeAutoArchive(id);
 }
 
 let isPolling = false;
 
-export async function pollOnce() {
-  // Skip if not configured, or if a previous cycle is still running (avoids overlapping polls).
-  if (!plaud.configured || isPolling) return;
+export async function pollOnce(): Promise<void> {
+  if (!isConfigured() || isPolling) return;
   isPolling = true;
   try {
-    const files = await plaud.listFiles();
-    for (const f of files) await mirrorFile(f).catch((e) => console.error("mirror", f.id, e));
+    const items = await plaud.listAll();
+    for (const it of items) {
+      if (it.isTrash) continue;
+      const existing = getRecording.get(it.id) as Recording | undefined;
+      // Fully mirrored already (audio + transcript) — nothing to do.
+      if (existing?.audio_path && existing.has_plaud_transcript) continue;
+      await mirrorOne(it.id).catch((e) => console.error("[poller] mirror", it.id, (e as Error).message));
+    }
   } catch (e) {
-    console.error("poll failed:", (e as Error).message);
+    if (e instanceof plaud.PlaudAuthError) {
+      console.error("[poller] Plaud token invalid — paste a fresh one in Settings");
+    } else {
+      console.error("[poller] poll failed:", (e as Error).message);
+    }
   } finally {
     isPolling = false;
   }
 }
 
 export function startPoller() {
-  console.log(`[poller] interval ${config.plaud.pollInterval}s, plaud ${plaud.configured ? "configured" : "NOT configured"}`);
+  console.log(
+    `[poller] interval ${config.plaud.pollInterval}s, plaud ${isConfigured() ? "configured" : "NOT configured"}`
+  );
   pollOnce();
   setInterval(pollOnce, config.plaud.pollInterval * 1000);
 }
