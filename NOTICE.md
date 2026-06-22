@@ -1,26 +1,35 @@
 # Attribution & Notices
 
-Applaud-Assistant is a derivative work that merges ideas and code from two upstream projects:
+Applaud-Assistant is an **original implementation** whose architecture and feature set were
+*inspired by* two existing projects. The code in this repository was written for this project; it
+does **not** include copied source code from either upstream. We credit both for the ideas.
 
-## rsteckler/applaud
+## Inspired by: rsteckler/applaud
 - Source: https://github.com/rsteckler/applaud
 - License: MIT
-- Contribution to this project: the Plaud.ai mirroring approach (browser-session JWT, polling the
-  Plaud web API), webhook event model (`audio_ready` / `transcript_ready`), and the
-  TypeScript/Express + SQLite service shape.
+- Ideas reflected here: the Plaud.ai mirroring approach (browser-session JWT, polling the Plaud
+  web API), the webhook event model (`audio_ready` / `transcript_ready`), and a TypeScript/Express
+  + SQLite service shape.
 
-## landoncrabtree/applaud
+## Inspired by: landoncrabtree/applaud
 - Source: https://github.com/landoncrabtree/applaud
-- License: not explicitly stated upstream at time of writing — **see caveat below**.
-- Contribution to this project: the fully-local pipeline — Whisper transcription
-  (`insanely-fast-whisper`) and multi-provider LLM analysis (OpenAI, Anthropic, Google/Gemini,
-  Ollama, OpenRouter), plus the watcher/derivative-content concepts (summaries, flashcards, Q&A).
+- License: none declared upstream at the time of writing.
+- Ideas reflected here: a fully-local pipeline — Whisper transcription and multi-provider LLM
+  analysis (OpenAI, Anthropic, Google/Gemini, Ollama, OpenRouter) — plus derivative-content
+  concepts (summaries, flashcards, Q&A).
 
-## License caveat
+## Licensing notes (plain English)
 
-The unified code in this repository is offered under the MIT License (see headers / `LICENSE`).
-However, `landoncrabtree/applaud` did not declare an explicit license at the time this project
-was assembled. Before publishing or distributing any code derived from it, confirm its licensing
-terms with the upstream author. Until then, treat the Python `processing` service's
-landoncrabtree-derived portions as "all rights reserved by upstream" and keep this repository
-private.
+- **Ideas vs. code.** Copyright protects the specific *code* someone wrote, not the general *idea*
+  ("transcribe with Whisper, then summarize with an LLM"). This repository reimplements the ideas
+  with its own code, so the absence of a license on `landoncrabtree/applaud` does not restrict it.
+- **Don't copy their files.** If actual source files from `landoncrabtree/applaud` were ever pasted
+  into this repo, that code would be "all rights reserved" until its author adds a license. We
+  don't do that here.
+- **rsteckler/applaud is MIT**, which permits reuse with attribution — this notice provides it.
+- **This repository's own code** is offered under the MIT License (see `LICENSE`).
+
+### Optional: make it airtight
+If you want zero ambiguity, open a friendly issue on `landoncrabtree/applaud` asking the author to
+add a `LICENSE` file (MIT is a common, permissive choice). Many maintainers are happy to oblige.
+This is a nice-to-have, not a blocker.

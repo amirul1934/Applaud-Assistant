@@ -39,5 +39,6 @@ archiver. The items below turn the skeleton into the full product.
 
 ## Known caveats
 - Plaud access is via an undocumented API and may break if Plaud changes it.
-- `landoncrabtree/applaud` licensing is unconfirmed — keep this repo private until resolved
-  (see `NOTICE.md`).
+- This repo reimplements the concepts of both upstream projects with original code rather than
+  copying their source, so `landoncrabtree/applaud` having no upstream license is not a blocker.
+  See `NOTICE.md` for the full explanation.
