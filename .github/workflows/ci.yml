@@ -57,3 +57,21 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m compileall -q app
       - run: python -c "import app.main"
+
+  sync-test:
+    name: sync (integration test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/sync
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Native builds (better-sqlite3) ARE needed here — don't skip scripts.
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm test
