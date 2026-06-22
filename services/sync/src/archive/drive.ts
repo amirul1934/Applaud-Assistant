@@ -5,9 +5,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { google } from "googleapis";
-import type { OAuth2Client } from "google-auth-library";
 import { config } from "../config.js";
 import { getRecording, type Recording } from "../db.js";
+
+// Derive the OAuth2 client type from googleapis itself so we don't depend on google-auth-library
+// directly (pnpm doesn't expose transitive deps).
+type OAuth2Client = InstanceType<typeof google.auth.OAuth2>;
 
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 const REDIRECT = "urn:ietf:wg:oauth:2.0:oob"; // desktop flow; UI can also use a loopback redirect
@@ -103,9 +106,10 @@ export async function archiveRecording(id: string): Promise<{ folderId: string; 
     q: `'${folderId}' in parents and trashed = false`,
     fields: "files(id, name)",
   });
-  const existingByName = new Map(
-    (existing.data.files ?? []).map((f) => [String(f.name), f.id!] as [string, string])
-  );
+  const existingByName = new Map<string, string>();
+  for (const f of existing.data.files ?? []) {
+    if (f.name && f.id) existingByName.set(f.name, f.id);
+  }
 
   const uploaded: string[] = [];
   for (const name of fs.readdirSync(dir)) {
