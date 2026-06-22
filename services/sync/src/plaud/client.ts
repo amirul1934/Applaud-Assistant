@@ -73,7 +73,7 @@ async function plaudFetch(pathName: string, init: RequestInit = {}, attempt = 0)
   return res;
 }
 
-async function plaudJson<T = any>(pathName: string, init: RequestInit = {}): Promise<T> {
+async function plaudJson<T = any>(pathName: string, init: RequestInit = {}, redirects = 0): Promise<T> {
   const res = await plaudFetch(pathName, init);
   const body = await res.text();
   if (!res.ok) throw new PlaudApiError(`Plaud ${pathName} -> ${res.status}`, res.status, body);
@@ -83,13 +83,13 @@ async function plaudJson<T = any>(pathName: string, init: RequestInit = {}): Pro
   } catch {
     throw new PlaudApiError(`Plaud ${pathName} returned non-JSON`, res.status, body);
   }
-  // Region correction: -302 tells us the right regional host; switch and retry once.
-  if (json?.status === -302) {
+  // Region correction: -302 tells us the right regional host. Switch and retry through plaudJson
+  // itself (so the retry gets the same ok/JSON/auth handling), bounded to avoid redirect loops.
+  if (json?.status === -302 && redirects < 2) {
     const base = resolveRegionalBase(json);
     if (base) {
       setApiBase(base);
-      const retry = await plaudFetch(pathName, init);
-      return JSON.parse(await retry.text());
+      return plaudJson<T>(pathName, init, redirects + 1);
     }
   }
   return json as T;
