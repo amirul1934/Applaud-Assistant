@@ -1,4 +1,4 @@
-"""Internal processing API: Whisper transcription + LLM analysis.
+"""Internal processing API: Whisper transcription + LLM analysis (summary, flashcards, Q&A).
 
 Not exposed to the host — only the `sync` gateway calls it over the compose network.
 """
@@ -7,11 +7,11 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from .analyze import summarize
+from .analyze import flashcards, qa, summarize
 from .config import config
 from .transcribe import transcribe
 
-app = FastAPI(title="Applaud-Assistant Processing", version="0.1.0")
+app = FastAPI(title="Applaud-Assistant Processing", version="0.2.0")
 
 
 class TranscribeRequest(BaseModel):
@@ -43,5 +43,21 @@ def do_transcribe(req: TranscribeRequest) -> dict:
 def do_analyze(req: AnalyzeRequest) -> dict:
     try:
         return {"summary": summarize(req.transcript, req.provider, req.model)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/flashcards")
+def do_flashcards(req: AnalyzeRequest) -> dict:
+    try:
+        return {"cards": flashcards(req.transcript, req.provider, req.model)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/qa")
+def do_qa(req: AnalyzeRequest) -> dict:
+    try:
+        return {"qa": qa(req.transcript, req.provider, req.model)}
     except Exception as e:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(e))

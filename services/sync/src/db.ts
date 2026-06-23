@@ -44,6 +44,12 @@ db.exec(`
   );
 `);
 
+// Lightweight migrations: add newer columns to databases created before they existed.
+for (const col of ["has_local_flashcards", "has_local_qa"]) {
+  const exists = db.prepare(`SELECT 1 FROM pragma_table_info('recordings') WHERE name = ?`).get(col);
+  if (!exists) db.exec(`ALTER TABLE recordings ADD COLUMN ${col} INTEGER DEFAULT 0`);
+}
+
 export interface Recording {
   id: string;
   title: string | null;
@@ -55,6 +61,8 @@ export interface Recording {
   has_plaud_transcript: number;
   has_local_transcript: number;
   has_local_summary: number;
+  has_local_flashcards: number;
+  has_local_qa: number;
   archive_status: string;
   drive_folder_id: string | null;
 }
@@ -80,6 +88,8 @@ const FLAG_COLUMNS = new Set([
   "has_plaud_transcript",
   "has_local_transcript",
   "has_local_summary",
+  "has_local_flashcards",
+  "has_local_qa",
 ]);
 export const setFlag = (id: string, column: string, value: number) => {
   if (!FLAG_COLUMNS.has(column)) throw new Error(`illegal flag column: ${column}`);

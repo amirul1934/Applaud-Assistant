@@ -115,13 +115,19 @@ export function App() {
                   ? "local transcript"
                   : r.has_plaud_transcript
                   ? "plaud transcript"
-                  : "no transcript"}{" "}
-                · archive: {r.archive_status}
+                  : "no transcript"}
+                {r.has_local_summary ? " · summary" : ""}
+                {r.has_local_flashcards ? " · cards" : ""}
+                {r.has_local_qa ? " · q&a" : ""}
+                {" · archive: "}
+                {r.archive_status}
               </div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
               <button onClick={() => act(api.transcribe(r.id), refresh, setError)}>Transcribe</button>
-              <button onClick={() => act(api.analyze(r.id), refresh, setError)}>Analyze</button>
+              <button onClick={() => act(api.analyze(r.id), refresh, setError)}>Summary</button>
+              <button onClick={() => act(api.flashcards(r.id), refresh, setError)}>Flashcards</button>
+              <button onClick={() => act(api.qa(r.id), refresh, setError)}>Q&amp;A</button>
               <button onClick={() => act(api.archive(r.id), refresh, setError)}>Archive</button>
             </div>
           </li>

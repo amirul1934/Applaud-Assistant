@@ -1,8 +1,8 @@
-"""Whisper transcription.
+"""Whisper transcription via faster-whisper (CTranslate2).
 
-Foundation skeleton: the device-selection + return shape are real and stable. The actual
-`insanely-fast-whisper` call is gated behind an import so the service boots (and the rest of the
-stack is testable) even before heavy ML deps/models are installed. Phase 3 makes it real.
+faster-whisper runs well on CPU (int8) and GPU (float16), returns segment timestamps natively, and
+needs no PyTorch on CPU. The model is loaded once and cached. If faster-whisper isn't installed the
+function returns an explicit empty placeholder so the rest of the stack still runs and is testable.
 """
 from __future__ import annotations
 
@@ -10,8 +10,7 @@ import os
 
 from .config import config
 
-# Whisper pipeline is expensive to construct (loads the model into RAM/VRAM); build it once.
-_pipe = None
+_model = None  # cached faster_whisper.WhisperModel
 
 
 def _pick_device() -> str:
@@ -22,45 +21,53 @@ def _pick_device() -> str:
 
         if torch.cuda.is_available():
             return "cuda"
-        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
-            return "mps"
     except Exception:
         pass
     return "cpu"
+
+
+def _compute_type(device: str) -> str:
+    if config.whisper_compute_type:
+        return config.whisper_compute_type
+    return "float16" if device == "cuda" else "int8"
+
+
+def _get_model():
+    global _model
+    if _model is None:
+        from faster_whisper import WhisperModel  # type: ignore
+
+        device = _pick_device()
+        _model = WhisperModel(config.whisper_model, device=device, compute_type=_compute_type(device))
+    return _model
 
 
 def transcribe(audio_path: str) -> dict:
     if not os.path.exists(audio_path):
         raise FileNotFoundError(audio_path)
 
-    global _pipe
     device = _pick_device()
     try:
-        if _pipe is None:
-            from transformers import pipeline  # type: ignore
-
-            _pipe = pipeline(
-                "automatic-speech-recognition",
-                model=config.whisper_model,
-                device=device if device != "cpu" else -1,
-                return_timestamps=True,
-            )
-        out = _pipe(audio_path)
-        chunks = out.get("chunks", [])
-        segments = [
-            {
-                "start": (c.get("timestamp") or [0, 0])[0] or 0,
-                "end": (c.get("timestamp") or [0, 0])[1] or 0,
-                "text": c.get("text", "").strip(),
-            }
-            for c in chunks
-        ]
-        return {"text": out.get("text", "").strip(), "segments": segments, "device": device}
+        model = _get_model()
     except ImportError:
-        # Deps not installed yet — return an explicit, non-crashing placeholder.
+        # ML deps not installed yet — return an explicit, non-crashing placeholder.
         return {
             "text": "",
             "segments": [],
             "device": device,
-            "note": "whisper deps not installed; see services/processing/requirements.txt (Phase 3)",
+            "note": "faster-whisper not installed; uncomment it in services/processing/requirements.txt",
         }
+
+    # vad_filter trims silence so short/sparse recordings transcribe cleanly.
+    segments_iter, info = model.transcribe(audio_path, vad_filter=True)
+    segments = [
+        {"start": round(s.start, 2), "end": round(s.end, 2), "text": s.text.strip()}
+        for s in segments_iter
+    ]
+    text = " ".join(s["text"] for s in segments).strip()
+    return {
+        "text": text,
+        "segments": segments,
+        "language": getattr(info, "language", None),
+        "device": device,
+    }

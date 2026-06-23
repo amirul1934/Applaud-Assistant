@@ -35,9 +35,12 @@ Set `LLM_PROVIDER` and the matching key:
   `docker compose exec ollama ollama pull llama3.1`.
 - `openai` / `anthropic` / `gemini` / `openrouter` — set the corresponding `*_API_KEY`.
 
-## 5. Whisper
-- `WHISPER_DEVICE=auto` picks CUDA → MPS → CPU.
-- First run downloads the model named by `WHISPER_MODEL` into `./models`.
+## 5. Whisper (local transcription)
+- Uncomment `faster-whisper` in `services/processing/requirements.txt` to enable it.
+- `WHISPER_DEVICE=auto` picks CUDA if available, else CPU.
+- `WHISPER_MODEL` (default `base`) — try `small`/`medium` for more accuracy, `large-v3` on a GPU.
+- The first transcription downloads the model into `./models`. CPU works (int8); a GPU is far faster.
+- The **Summary / Flashcards / Q&A** buttons then run locally via your configured `LLM_PROVIDER`.
 
 ## 6. Run
 ```bash
