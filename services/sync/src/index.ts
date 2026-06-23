@@ -1,7 +1,7 @@
 // Applaud-Assistant gateway: auth, recordings API, on-demand processing, Drive archive, poller.
 import fs from "node:fs";
 import path from "node:path";
-import express from "express";
+import express, { type Request, type Response } from "express";
 import cookieParser from "cookie-parser";
 import { config } from "./config.js";
 import { login, logout, requireAuth } from "./auth.js";
@@ -70,26 +70,42 @@ api.post("/recordings/:id/transcribe", (req, res) => {
   res.status(202).json({ ok: true, jobId });
 });
 
-// On-demand local LLM analysis (summary). Reads the best available transcript.
-api.post("/recordings/:id/analyze", async (req, res) => {
-  const rec = getRecording.get(req.params.id) as Recording | undefined;
-  if (!rec) return res.status(404).json({ error: "not found" });
+// --- On-demand local LLM analysis: summary / flashcards / Q&A ---
+// All read the best available transcript, run in the background (LLM calls are slow), and report
+// via the jobs table (queued -> running -> done/error).
+function transcriptTextFor(rec: Recording): string | null {
   const dir = path.join(config.recordingsDir, rec.id);
   const localT = path.join(dir, "local.transcript.json");
   const plaudT = path.join(dir, "plaud.transcript.json");
   const file = fs.existsSync(localT) ? localT : fs.existsSync(plaudT) ? plaudT : null;
-  if (!file) return res.status(409).json({ error: "no transcript yet — transcribe first" });
+  if (!file) return null;
+  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (typeof data?.text === "string") return data.text; // local Whisper result
+  if (Array.isArray(data)) return data.map((s: any) => s?.text ?? "").join("\n"); // plaud segments
+  return JSON.stringify(data);
+}
 
-  const transcript = JSON.parse(fs.readFileSync(file, "utf8"));
-  const text = typeof transcript.text === "string" ? transcript.text : JSON.stringify(transcript);
+function startAnalysis(
+  req: Request,
+  res: Response,
+  kind: string,
+  outFile: string,
+  flagCol: string,
+  produce: (text: string, opts: { provider?: string; model?: string }) => Promise<string>
+) {
+  const rec = getRecording.get(req.params.id) as Recording | undefined;
+  if (!rec) return res.status(404).json({ error: "not found" });
+  const text = transcriptTextFor(rec);
+  if (!text) return res.status(409).json({ error: "no transcript yet — transcribe first" });
   const { provider, model } = req.body ?? {};
-  const jobId = Number(createJob.run(rec.id, "analyze", Date.now(), Date.now()).lastInsertRowid);
+  const jobId = Number(createJob.run(rec.id, kind, Date.now(), Date.now()).lastInsertRowid);
 
   void (async () => {
+    updateJob.run("running", null, Date.now(), jobId);
     try {
-      const { summary } = await processing.analyze(text, { provider, model });
-      fs.writeFileSync(path.join(dir, "local.summary.md"), summary);
-      setFlag(rec.id, "has_local_summary", 1);
+      const output = await produce(text, { provider, model });
+      fs.writeFileSync(path.join(config.recordingsDir, rec.id, outFile), output);
+      setFlag(rec.id, flagCol, 1);
       updateJob.run("done", null, Date.now(), jobId);
     } catch (e) {
       updateJob.run("error", (e as Error).message, Date.now(), jobId);
@@ -97,7 +113,23 @@ api.post("/recordings/:id/analyze", async (req, res) => {
   })();
 
   res.status(202).json({ ok: true, jobId });
-});
+}
+
+api.post("/recordings/:id/analyze", (req, res) =>
+  startAnalysis(req, res, "analyze", "local.summary.md", "has_local_summary", async (t, o) =>
+    (await processing.analyze(t, o)).summary
+  )
+);
+api.post("/recordings/:id/flashcards", (req, res) =>
+  startAnalysis(req, res, "flashcards", "local.flashcards.json", "has_local_flashcards", async (t, o) =>
+    JSON.stringify((await processing.flashcards(t, o)).cards, null, 2)
+  )
+);
+api.post("/recordings/:id/qa", (req, res) =>
+  startAnalysis(req, res, "qa", "local.qa.json", "has_local_qa", async (t, o) =>
+    JSON.stringify((await processing.qa(t, o)).qa, null, 2)
+  )
+);
 
 // Poll the status of a background job (transcribe / analyze).
 api.get("/jobs/:id", (req, res) => {

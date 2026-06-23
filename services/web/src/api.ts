@@ -7,6 +7,8 @@ export interface Recording {
   has_plaud_transcript: number;
   has_local_transcript: number;
   has_local_summary: number;
+  has_local_flashcards: number;
+  has_local_qa: number;
   archive_status: string;
 }
 
@@ -40,6 +42,8 @@ export const api = {
   recordings: (): Promise<Recording[]> => req("/recordings"),
   transcribe: (id: string) => req(`/recordings/${id}/transcribe`, { method: "POST" }),
   analyze: (id: string) => req(`/recordings/${id}/analyze`, { method: "POST" }),
+  flashcards: (id: string) => req(`/recordings/${id}/flashcards`, { method: "POST" }),
+  qa: (id: string) => req(`/recordings/${id}/qa`, { method: "POST" }),
   archive: (id: string) => req(`/recordings/${id}/archive`, { method: "POST" }),
   driveStatus: (): Promise<{ connected: boolean }> => req("/drive/status"),
   search: (q: string): Promise<SearchHit[]> => req(`/search?q=${encodeURIComponent(q)}`),
