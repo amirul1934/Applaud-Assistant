@@ -28,10 +28,10 @@ You don't need Docker Desktop on Linux — install the native Docker engine inst
 Arch**:
 
 ```bash
-sudo pacman -S docker docker-compose git     # install Docker + Compose + Git
+sudo pacman -S docker docker-compose docker-buildx git   # Buildx is needed for "compose --build"
 sudo systemctl enable --now docker           # start it now and on every boot
 sudo usermod -aG docker $USER                # run docker without sudo
-# log out and back in (or run: newgrp docker), then verify:
+# log out and back in so the group applies everywhere (or "newgrp docker" for just this shell):
 docker run hello-world
 ```
 
@@ -140,7 +140,7 @@ docker compose up --build
 **With local Ollama (if you chose it in step 4):**
 ```bash
 docker compose --profile ollama up --build
-# then, in a second terminal, pull a model once:
+# then, in a second terminal, pull your model once (must match LLM_MODEL in .env):
 docker compose --profile ollama exec ollama ollama pull llama3.1
 ```
 
