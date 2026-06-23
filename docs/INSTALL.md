@@ -53,7 +53,13 @@ AUTH_SECRET=a-long-random-string
 Generate a good `AUTH_SECRET` (and password) with:
 
 ```bash
-openssl rand -hex 32        # Windows: just type a long random string of your own
+openssl rand -hex 32        # macOS / Linux
+```
+
+On **Windows PowerShell**, use this instead:
+
+```powershell
+[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
 ```
 
 > 🔒 Don't leave the defaults. This password protects your recordings and cloud credentials.
@@ -110,7 +116,7 @@ docker compose up --build
 ```bash
 docker compose --profile ollama up --build
 # then, in a second terminal, pull a model once:
-docker compose exec ollama ollama pull llama3.1
+docker compose --profile ollama exec ollama ollama pull llama3.1
 ```
 
 The first build takes a few minutes. When it's ready, open **http://localhost:3000**.
