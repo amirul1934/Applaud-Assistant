@@ -61,6 +61,8 @@ Full setup (Plaud token, Google Drive OAuth, LLM keys, Whisper/GPU) is in
 
 ## Status
 
-🚧 **Foundation / scaffold.** The monorepo, service skeletons, Docker Compose wiring, auth,
-event contracts, and the Google Drive archiver are in place. Heavy lifting (full Plaud scraping,
-production Whisper pipeline, complete UI) is tracked in [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+🚧 **Active build.** Foundation **plus a real Plaud mirror** are in place: the monorepo, Docker
+Compose wiring, single-user auth, event contracts, the Google Drive archiver, the production Plaud
+client (audio + transcripts + summaries, regional hosts, runtime token/expiry handling),
+incremental sync, and full-text transcript search. Remaining work (production Whisper/LLM pipeline,
+richer UI) is tracked in [`docs/ROADMAP.md`](./docs/ROADMAP.md).

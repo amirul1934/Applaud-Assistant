@@ -9,7 +9,9 @@ import {
   createJob,
   getJob,
   getRecording,
+  indexTranscript,
   listRecordings,
+  searchTranscripts,
   setFlag,
   updateJob,
   type Recording,
@@ -18,7 +20,8 @@ import { processing } from "./processingClient.js";
 import { emit } from "./webhooks.js";
 import { runArchive } from "./archiveQueue.js";
 import { getConsentUrl, isConnected, saveTokenFromCode } from "./archive/drive.js";
-import { startPoller } from "./sync/poller.js";
+import { startPoller, pollOnce } from "./sync/poller.js";
+import { getState, isConfigured, setBearerToken } from "./plaud/store.js";
 
 const app = express();
 app.use(express.json({ limit: "5mb" }));
@@ -55,6 +58,7 @@ api.post("/recordings/:id/transcribe", (req, res) => {
       const result = await processing.transcribe(rec.audio_path!);
       const dir = path.join(config.recordingsDir, rec.id);
       fs.writeFileSync(path.join(dir, "local.transcript.json"), JSON.stringify(result, null, 2));
+      if (result.text) indexTranscript(rec.id, "local", result.text);
       setFlag(rec.id, "has_local_transcript", 1);
       updateJob.run("done", null, Date.now(), jobId);
       await emit("transcript_ready", { id: rec.id, source: "local" });
@@ -122,6 +126,35 @@ api.post("/drive/callback", async (req, res) => {
   } catch (e) {
     res.status(400).json({ error: (e as Error).message });
   }
+});
+
+// --- Full-text search across transcripts ---
+api.get("/search", (req, res) => {
+  const q = String(req.query.q ?? "").trim();
+  if (!q) return res.json([]);
+  try {
+    res.json(searchTranscripts.all(q));
+  } catch (e) {
+    // FTS5 throws on malformed match expressions — treat as a bad query, not a server error.
+    res.status(400).json({ error: (e as Error).message });
+  }
+});
+
+// --- Plaud connection (token + manual sync) ---
+api.get("/plaud/status", (_req, res) => {
+  const s = getState();
+  res.json({ configured: isConfigured(), tokenValid: s.tokenValid, apiBase: s.apiBase });
+});
+api.post("/plaud/token", (req, res) => {
+  const token = String(req.body?.token ?? "").trim();
+  if (!token) return res.status(400).json({ error: "token required" });
+  setBearerToken(token);
+  pollOnce(); // kick a sync with the fresh token
+  res.json({ ok: true });
+});
+api.post("/plaud/sync", (_req, res) => {
+  pollOnce();
+  res.json({ ok: true });
 });
 
 app.use("/api", api);
