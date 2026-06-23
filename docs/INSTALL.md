@@ -20,7 +20,26 @@ running before any `docker compose` command will work.
 
 > **Windows:** use **PowerShell** (search "PowerShell" in the Start menu). Docker Desktop will ask
 > to enable WSL2 — accept it.
-> **macOS / Linux:** use the **Terminal**.
+> **macOS:** use the **Terminal**.
+
+### On Linux (Arch / CachyOS / handhelds)
+
+You don't need Docker Desktop on Linux — install the native Docker engine instead. On **CachyOS or
+Arch**:
+
+```bash
+sudo pacman -S docker docker-compose git     # install Docker + Compose + Git
+sudo systemctl enable --now docker           # start it now and on every boot
+sudo usermod -aG docker $USER                # run docker without sudo
+# log out and back in (or run: newgrp docker), then verify:
+docker run hello-world
+```
+
+Then continue from Step 1 — the rest is identical. (On Debian/Ubuntu/Fedora, install Docker Engine
+per that distro's docs; everything else is the same.)
+
+> **Handheld images (e.g. CachyOS handheld / SteamOS-like):** boot into **desktop mode** to get a
+> terminal and a browser. You'll open the app at `http://localhost:3000`.
 
 ---
 
@@ -86,6 +105,11 @@ WHISPER_MODEL=base     # fast, lower accuracy — best for your first test
 > Start with `base`. The first transcription downloads the model, so give it a minute. You can
 > skip this whole step for now and just test the Plaud mirror.
 
+> **GPU note:** the bundled GPU acceleration is **NVIDIA-only** (CUDA). On **AMD APUs / integrated
+> graphics** (e.g. GPD Win Mini and most handhelds) and on Macs, Whisper runs on the **CPU**
+> automatically (`WHISPER_DEVICE=auto`) — leave the NVIDIA block in `docker-compose.yml` commented
+> and stick to `base`/`small`. A capable multi-core CPU handles those fine.
+
 ---
 
 ## 4. (Optional) Choose your LLM for summaries/flashcards/Q&A
@@ -97,7 +121,8 @@ Edit the LLM section of `.env`:
   LLM_PROVIDER=ollama
   LLM_MODEL=llama3.1
   ```
-  You'll start Ollama in step 5 and pull the model.
+  You'll start Ollama in step 5 and pull the model. On low-RAM machines (≤16 GB) prefer a small
+  model, e.g. `LLM_MODEL=llama3.2:3b`, or use a hosted provider below.
 - **Hosted (OpenAI / Anthropic / Gemini / OpenRouter):** set `LLM_PROVIDER` and the matching key,
   e.g. `LLM_PROVIDER=openai` and `OPENAI_API_KEY=sk-...`.
 
