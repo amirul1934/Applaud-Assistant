@@ -56,8 +56,9 @@ cp .env.example .env        # fill in your values
 docker compose up --build   # web on :3000, sync API on :8080
 ```
 
-Full setup (Plaud token, Google Drive OAuth, LLM keys, Whisper/GPU) is in
-[`docs/SETUP.md`](./docs/SETUP.md).
+New here? Follow the **step-by-step** [`docs/INSTALL.md`](./docs/INSTALL.md). A condensed version is
+in [`docs/SETUP.md`](./docs/SETUP.md). After you've tested it, see the prioritized
+[`docs/POST-TEST-SUGGESTIONS.md`](./docs/POST-TEST-SUGGESTIONS.md).
 
 ## Status
 
