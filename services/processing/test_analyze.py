@@ -56,8 +56,12 @@ def main():
     _Handler.reply = "I could not produce JSON."
     assert analyze.flashcards("x") == []
 
+    # 5) trailing prose containing brackets must not break extraction
+    _Handler.reply = '[{"front": "X", "back": "Y"}] Note: see item [1] for details.'
+    assert analyze.flashcards("x") == [{"front": "X", "back": "Y"}]
+
     server.shutdown()
-    print("test_analyze: 4 passed")
+    print("test_analyze: 5 passed")
 
 
 if __name__ == "__main__":

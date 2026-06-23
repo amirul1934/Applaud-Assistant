@@ -79,7 +79,13 @@ function transcriptTextFor(rec: Recording): string | null {
   const plaudT = path.join(dir, "plaud.transcript.json");
   const file = fs.existsSync(localT) ? localT : fs.existsSync(plaudT) ? plaudT : null;
   if (!file) return null;
-  const data = JSON.parse(fs.readFileSync(file, "utf8"));
+  let data: any;
+  try {
+    data = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    console.error(`failed to parse transcript ${file}:`, (e as Error).message);
+    return null; // corrupt/partial transcript file — treat as "no transcript yet"
+  }
   if (typeof data?.text === "string") return data.text; // local Whisper result
   if (Array.isArray(data)) return data.map((s: any) => s?.text ?? "").join("\n"); // plaud segments
   return JSON.stringify(data);

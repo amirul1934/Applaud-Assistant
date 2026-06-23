@@ -63,11 +63,42 @@ def _extract_json_array(raw: str) -> list:
     fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.DOTALL)
     if fence:
         text = fence.group(1).strip()
-    start, end = text.find("["), text.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        text = text[start : end + 1]
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+    # Try the whole string, then the first balanced [...] block — robust against trailing prose
+    # that itself contains brackets (which a naive rfind("]") would wrongly include).
+    for candidate in _json_array_candidates(text):
+        try:
+            data = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, list):
+            return data
+    return []
+
+
+def _json_array_candidates(text: str):
+    yield text
+    start = text.find("[")
+    if start == -1:
+        return
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+            continue
+        if c == '"':
+            in_str = True
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                yield text[start : i + 1]
+                return
